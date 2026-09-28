@@ -7,8 +7,17 @@ const { resolvePrice } = require('./src/pricing');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const dbReady = initDb();
 
 app.use(express.json({ limit: '200kb' }));
+app.use('/api', async (req, res, next) => {
+  try {
+    await dbReady;
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -340,6 +349,10 @@ app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.status ? err.message : 'Server error' });
 });
 
-initDb()
-  .then(() => app.listen(PORT, () => console.log(`Pasalho Sales listening on ${PORT}`)))
-  .catch(err => { console.error('Database initialization failed', err); process.exit(1); });
+module.exports = app;
+
+if (!process.env.VERCEL) {
+  dbReady
+    .then(() => app.listen(PORT, () => console.log(`Pasalho Sales listening on ${PORT}`)))
+    .catch(err => { console.error('Database initialization failed', err); process.exit(1); });
+}
