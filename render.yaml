@@ -3,7 +3,7 @@ services:
     name: pasalho-sales
     runtime: node
     plan: free
-    buildCommand: npm ci
+    buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /health
     envVars:
@@ -16,4 +16,4 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
       - key: WHATSAPP_NUMBER
-        value: "9779822403262"
+        sync: false
