@@ -301,11 +301,60 @@ app.get('/api/admin/orders', authRequired('admin'), asyncRoute(async (_req, res)
   const { rows } = await pool.query(`
     SELECT o.*, r.shop_name, r.area, sr.name sales_rep_name,
       COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id),0) paid_amount,
-      o.total-COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id),0) balance
+      o.total-COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id=o.id),0) balance,
+      COALESCE((
+        SELECT json_agg(
+          json_build_object(
+            'id', oi.id,
+            'product_id', oi.product_id,
+            'name', oi.product_name_snapshot,
+            'unit', oi.unit_snapshot,
+            'quantity', oi.quantity,
+            'unit_price', oi.unit_price,
+            'line_total', oi.line_total
+          ) ORDER BY oi.id
+        )
+        FROM order_items oi
+        WHERE oi.order_id=o.id
+      ), '[]') items
     FROM orders o JOIN retailers r ON r.id=o.retailer_id JOIN sales_reps sr ON sr.id=o.sales_rep_id
     ORDER BY o.created_at DESC LIMIT 500
   `);
   res.json(rows);
+}));
+
+app.get('/api/admin/product-performance', authRequired('admin'), asyncRoute(async (req, res) => {
+  const period = String(req.query.period || '30d');
+  const periodSql = {
+    today: "AND o.created_at::date = CURRENT_DATE",
+    '7d': "AND o.created_at >= NOW() - INTERVAL '7 days'",
+    '30d': "AND o.created_at >= NOW() - INTERVAL '30 days'",
+    all: ''
+  }[period] ?? "AND o.created_at >= NOW() - INTERVAL '30 days'";
+
+  const { rows } = await pool.query(`
+    SELECT
+      COALESCE(p.id, oi.product_id) product_id,
+      COALESCE(p.sku, '') sku,
+      oi.product_name_snapshot name,
+      oi.unit_snapshot unit,
+      COALESCE(p.category, 'Uncategorized') category,
+      SUM(oi.quantity) quantity_sold,
+      SUM(oi.line_total) revenue,
+      COUNT(DISTINCT oi.order_id)::int orders,
+      COUNT(DISTINCT o.retailer_id)::int retailers,
+      COUNT(DISTINCT o.sales_rep_id)::int reps,
+      AVG(oi.unit_price) avg_selling_price,
+      MAX(o.created_at) last_sold_at
+    FROM order_items oi
+    JOIN orders o ON o.id=oi.order_id
+    LEFT JOIN products p ON p.id=oi.product_id
+    WHERE 1=1
+      ${periodSql}
+    GROUP BY COALESCE(p.id, oi.product_id), COALESCE(p.sku, ''), oi.product_name_snapshot, oi.unit_snapshot, COALESCE(p.category, 'Uncategorized')
+    ORDER BY revenue DESC, quantity_sold DESC
+  `);
+  res.json({ period, rows });
 }));
 
 app.get('/api/admin/retailers', authRequired('admin'), asyncRoute(async (_req, res) => {
